@@ -3,9 +3,11 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import mongoose from "mongoose";
-import cloudinary from "cloudinary"
+import cloudinary from "cloudinary";
 import jwt from "jsonwebtoken";
-import { User } from "../models/user.model.js";
+import { User } from "../models/user.models.js";
+import mailSender from "../utils/Mailsender.js";
+import otpGenerator from "otp-generator";
 
 const generateAccessAndRefreshTokens = async (userId) => {
   try {
@@ -28,6 +30,72 @@ const generateAccessAndRefreshTokens = async (userId) => {
   }
 };
 
+const sendOTP = asyncHandler(async (req, res) => {
+  try {
+    // Check if user is already present
+
+    let otp = otpGenerator.generate(6, {
+      upperCaseAlphabets: false,
+      lowerCaseAlphabets: false,
+      specialChars: false,
+    });
+
+    const checkUserPresent = await User.findByIdAndUpdate(
+      { _id: req.user._id },
+      {
+        $set: {
+          otp: otp,
+        },
+      }
+    );
+    await checkUserPresent.sendVerificationCode();
+    res.status(200).json({
+      success: true,
+      message: "OTP sent successfully",
+      checkUserPresent,
+    });
+  } catch (error) {
+    console.log(error.message);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+const verifyOTP = asyncHandler(async (req, res) => {
+  const { OTP } = req.body;
+  if (!OTP) {
+    return res
+      .status(400)
+      .json({ success: false, message: "Please enter OTP" });
+  }
+
+  const user = await User.findById(req.user._id);
+
+  if (user.otp === OTP) {
+    // If OTP matches, update the user directly using findByIdAndUpdate
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user._id,
+      {
+        $set: {
+          otp: "",
+          isVerified: true,
+        },
+      },
+      { new: true } // To return the updated user document
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "OTP verified successfully",
+      updatedUser,
+    });
+  } else {
+    res.status(400).json({
+      success: false,
+      message: "OTP is not verified successfully",
+    });
+  }
+});
+
 const registerUser = asyncHandler(async (req, res) => {
   // 1. Fill a form with all field of UserModel from FrontEnd
   // validate these details i.e. some detail is empty or not.
@@ -39,13 +107,11 @@ const registerUser = asyncHandler(async (req, res) => {
   // 7. check for user creation
   // 8. return res
 
-  const { fullName, userName, email, interest, password } =
+  const { fullName, userName, email, password, currency, phoneNumber } =
     req.body;
 
   if (
-    [fullName, userName, email, interest, password].some(
-      (field) => field?.trim() === ""
-    )
+    [fullName, userName, email, password].some((field) => field?.trim() === "")
   ) {
     throw new ApiError(400, "All fields are required");
   }
@@ -56,20 +122,21 @@ const registerUser = asyncHandler(async (req, res) => {
   if (existedUser)
     throw new ApiError(409, "User with email or username already exists");
 
-  const avatarLocalPath = req.files?.avatar[0]?.path; //path in local server not on cloudinary
-  // console.log(req.files)
-  if (!avatarLocalPath) throw new ApiError(400, "Avatar file is required");
+  // const avatarLocalPath = req.files?.avatar[0]?.path; //path in local server not on cloudinary
+  // // console.log(req.files)
+  // if (!avatarLocalPath) throw new ApiError(400, "Avatar file is required");
 
-  const avatar = await uploadOnCloudinary(avatarLocalPath);
-  if (!avatar) throw new ApiError(400, "Avatar not found");
+  // const avatar = await uploadOnCloudinary(avatarLocalPath);
+  // if (!avatar) throw new ApiError(400, "Avatar not found");
 
   const user = await User.create({
     fullname: fullName,
-    avatar: avatar?.url || "",
-    email:email.toLowerCase(),
+    avatar: "",
+    email: email.toLowerCase(),
     password,
-    interest,
+    currency,
     username: userName?.toLowerCase(),
+    phoneNumber,
   });
   console.log(user);
 
@@ -86,7 +153,6 @@ const registerUser = asyncHandler(async (req, res) => {
 });
 
 const loginUser = asyncHandler(async (req, res) => {
-  
   const { userName, email, password } = req.body;
   // console.log(email, password);
   if (!(userName || email))
@@ -96,9 +162,9 @@ const loginUser = asyncHandler(async (req, res) => {
   //     field?.trim()==="")){
   //     throw new ApiError(400,"All fields are required")
   // }
-  const loweredEmail=email.toLowerCase()
-  const userExits = await User.findOne({ email:loweredEmail});
-  
+  const loweredEmail = email.toLowerCase();
+  const userExits = await User.findOne({ email: loweredEmail });
+
   if (!userExits) throw new ApiError(409, "User does not exist");
   console.log(userExits);
 
@@ -221,13 +287,11 @@ const changeCurrentPassword = asyncHandler(async (req, res) => {
 });
 
 const getCurrentUser = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.user._id)
+  const user = await User.findById(req.user._id);
   console.log(user);
   return res
     .status(200)
-    .json(
-      new ApiResponse(200, user, "Current User Fetched Successfully")
-    );
+    .json(new ApiResponse(200, user, "Current User Fetched Successfully"));
 });
 
 const updateAccountDetails = asyncHandler(async (req, res) => {
@@ -255,9 +319,9 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
 });
 
 const updateUserAvatar = asyncHandler(async (req, res) => {
-  console.log(req.file)
+  console.log(req.file);
 
-  const avatarLocalPath = req.file?.buffer
+  const avatarLocalPath = req.file?.buffer;
   if (!avatarLocalPath) throw new ApiError(400, "Avatar file is missing");
 
   // const avatar = await uploadOnCloudinary(avatarLocalPath);
@@ -352,7 +416,6 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
       new ApiResponse(200, channel[0], "User channel fetched successfully")
     );
 });
-
 
 const getConnections = asyncHandler(async (req, res) => {
   const { userId } = req.body;
@@ -453,4 +516,6 @@ export {
   getUserChannelProfile,
   getConnections,
   searchUser,
+  sendOTP,
+  verifyOTP,
 };
