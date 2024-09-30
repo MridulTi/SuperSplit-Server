@@ -10,7 +10,7 @@ const userSchemas=new mongoose.Schema({
     username:{
         type:String,
         required:true,
-        // unique:true
+        unique:true
     },
     email:{
         type:String,
@@ -23,15 +23,35 @@ const userSchemas=new mongoose.Schema({
     avatar:{
         type:String,
     },
-    interest:{
+    phoneNumber:{
         type:String,
-        enum:["Tech","Education","Health","Food","Fashion"],
-        required:true
+        required:true,
+        maxLength:10
     },
-    coins:{
-        type:Number,
-        default:0
-    }
+    isVerified:{
+        type:Boolean,
+        default:false
+    },
+    currency:{
+        type:String,
+        enum:["$","₹"]
+    },
+    groups:[{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"Group"
+    }],
+    expense:[{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"Expense"
+    }],
+    friends:[{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"User"
+    }],
+    FriendsBalance:[{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"SharedWith"
+    }]
 },{timestamps:true})
 
 userSchemas.pre("save",async function(next){
